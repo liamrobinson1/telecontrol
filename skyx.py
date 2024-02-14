@@ -4,8 +4,6 @@ The classes are defined to match the classes in Script TheSkyX. This isn't
 really necessary as they all just send the javascript to TheSkyX via
 SkyXConnection._send().
 '''
-from __future__ import print_function
-
 import logging
 import time
 from socket import socket, AF_INET, SOCK_STREAM, SHUT_RDWR, error
@@ -86,14 +84,14 @@ class SkyXConnection(object):
             logger.debug(command)
             sockobj = socket(AF_INET, SOCK_STREAM)
             sockobj.connect((self.host, self.port))
-            sockobj.send(bytes('/* Java Script */\n' +
+            sockobj.send(('/* Java Script */\n' +
                                '/* Socket Start Packet */\n' + command +
-                               '\n/* Socket End Packet */\n'))
+                               '\n/* Socket End Packet */\n').encode())
             oput = sockobj.recv(2048)
             logger.debug(oput)
             sockobj.shutdown(SHUT_RDWR)
             sockobj.close()
-            return oput.split("|")[0]
+            return oput.decode().split("|")[0]
         except error as msg:
             raise SkyxConnectionError("Connection to " + self.host + ":" + \
                                       str(self.port) + " failed. :" + str(msg))
@@ -127,7 +125,6 @@ class SkyXConnection(object):
             '''
         oput = self._send(command)
         for line in oput.splitlines():
-            print(line)
             if "Error" in line:
                 raise SkyxTypeError(line)
         return True
@@ -177,7 +174,7 @@ class TheSkyXAction(object):
         else:
             raise SkyxObjectNotFoundError(oput)
 
-class sky6ObjectInformation(object):
+class SkyXTargetInformation(object):
     ''' Class to implement the sky6ObjectInformation script class
     '''
     def __init__(self, host="localhost", port=3040):
@@ -196,14 +193,7 @@ class sky6ObjectInformation(object):
         oput = self.conn._send(command)
         return oput
 
-    def PropertyApplies(self, prop):
-        pass
-
-    def PropertyName(self, prop):
-        pass
-
-
-    def currentTargetRaDec(self, j="now"):
+    def current_target_ra_dec(self, j="now"):
         ''' Attempt to get info on the current target
         '''
         if j == "now":
@@ -230,10 +220,12 @@ class sky6ObjectInformation(object):
                       """
         else:
             raise SkyxTypeError("Unknown epoch: " + j)
-        output = self.conn._send(command).splitlines()[0].split()    
+        res = self.conn._send(command).splitlines()
+        logger.debug(res)
+        output = [float(x) for x in res[0].split()   ] 
         return output
-    
-    def sky6ObjectInformation(self, target):
+
+    def __call__(self, target):
         ''' Method to return basic SkyX position information on a target.
         '''
         # TODO: make target optional
@@ -248,46 +240,43 @@ class sky6ObjectInformation(object):
                 var Target78 = 0;
                 var Out = "";
                 var err;
-                sky6StarChart.LASTCOMERROR = 0;
-                sky6StarChart.Find(Target);
-                err = sky6StarChart.LASTCOMERROR;
-                if (err != 0) {
-                            Out = Target + " not found."
-                } else {
-                            sky6ObjectInformation.Property(56);
-                            Target56 = sky6ObjectInformation.ObjInfoPropOut;
-                            sky6ObjectInformation.Property(57);
-                            Target57 = sky6ObjectInformation.ObjInfoPropOut;
-                            sky6ObjectInformation.Property(58);
-                            Target58 = sky6ObjectInformation.ObjInfoPropOut;
-                            sky6ObjectInformation.Property(59);
-                            Target59 = sky6ObjectInformation.ObjInfoPropOut;
-                            sky6ObjectInformation.Property(77);
-                            Target77 = sky6ObjectInformation.ObjInfoPropOut;
-                            sky6ObjectInformation.Property(78);
-                            Target78 = sky6ObjectInformation.ObjInfoPropOut;
-                            Out = "sk6ObjInfoProp_RA_2000:"+String(Target56)+
-                            "\\nsk6ObjInfoProp_DEC_2000:"+String(Target57)+
-                            "\\nsk6ObjInfoProp_AZM:"+String(Target58)+
-                            "\\nsk6ObjInfoProp_ALT:"+String(Target59)+
-                            "\\nsk6ObjInfoProp_RA_RATE_ASPERSEC:"+String(Target77)+
-                            "\\nsk6ObjInfoProp_DEC_RATE_ASPERSEC:"+String(Target78)+"\\n";
-
+                try {
+                    sky6StarChart.Find(Target);
+                    sky6ObjectInformation.Property(54);
+                    Target56 = sky6ObjectInformation.ObjInfoPropOut;
+                    sky6ObjectInformation.Property(55);
+                    Target57 = sky6ObjectInformation.ObjInfoPropOut;
+                    sky6ObjectInformation.Property(58);
+                    Target58 = sky6ObjectInformation.ObjInfoPropOut;
+                    sky6ObjectInformation.Property(59);
+                    Target59 = sky6ObjectInformation.ObjInfoPropOut;
+                    sky6ObjectInformation.Property(77);
+                    Target77 = sky6ObjectInformation.ObjInfoPropOut;
+                    sky6ObjectInformation.Property(78);
+                    Target78 = sky6ObjectInformation.ObjInfoPropOut;
+                    Out = "sk6ObjInfoProp_RA_NOW:"+String(Target56)+
+                    "\\nsk6ObjInfoProp_DEC_NOW:"+String(Target57)+
+                    "\\nsk6ObjInfoProp_AZM:"+String(Target58)+
+                    "\\nsk6ObjInfoProp_ALT:"+String(Target59)+
+                    "\\nsk6ObjInfoProp_RA_RATE_ASPERSEC:"+String(Target77)+
+                    "\\nsk6ObjInfoProp_DEC_RATE_ASPERSEC:"+String(Target78)+"\\n";
+                } catch (e) {
+                    Out = Target + " not found.";
                 }
                 """
         results = {}
         oput = self.conn._send(command)
         for line in oput.splitlines():
-            if "Object not found" in line:
+            if "not found" in line:
                 raise SkyxObjectNotFoundError("Object not found.")
             if ":" in line:
-                info = line.split(":")[0]
-                val = line.split(":")[1]
+                info = line.split(":")[0].split("_", 1)[1].lower()
+                val = float(line.split(":")[1])
                 results[info] = val
         return results
 
 
-class ccdsoftCamera(object):
+class SkyXCamera(object):
     ''' Class to implement the ccdsoftCamera script class
     '''
     def __init__(self, host="localhost", port=3040):
@@ -295,8 +284,9 @@ class ccdsoftCamera(object):
         '''
         self.conn = SkyXConnection(host, port)
         self.frames = {1:"Light", 2:"Bias", 3:"Dark", 4:"Flat Field"}
+        self.connect()
         
-    def Connect(self, async=0):
+    def connect(self, is_async: bool = False):
         ''' Connect to the camera defined in the TheSkyX profile
       
             Returns True on success or throws a SkyxTypeError
@@ -305,7 +295,7 @@ class ccdsoftCamera(object):
                     var Imager = ccdsoftCamera;
                     var Out = "";
                     Imager.Connect();
-                    Imager.Asynchronous = """ + str(async) + """;
+                    Imager.Asynchronous = """ + str(int(is_async)) + """;
                     Out = Imager.Status;
                     """
         output = self.conn._send(command).splitlines()
@@ -313,7 +303,7 @@ class ccdsoftCamera(object):
             raise SkyxTypeError(output[0])
         return True
 
-    def Disconnect(self):
+    def disconnect(self):
         ''' Disconnect the camera
             Returns True on success or throws a SkyxTypeError
         '''
@@ -342,68 +332,101 @@ class ccdsoftCamera(object):
             raise SkyxTypeError(output[0])
         return(output[0])
     
-    def Bin(self, binning=None):
-        ''' Set the binning or return the current binning
+    @property
+    def binning(self):
+        """Get the current binning."""
+        command = "ccdsoftCamera.BinX"
+        binning_value = self.conn._send(command).splitlines()[0]
+        return binning_value
+
+    @binning.setter
+    def binning(self, value: int):
+        """Set the binning or return the current binning.
         
-            We assume NxN binning so just set/get BinX
-        '''
-        if binning == None:
-            command = "ccdsoftCamera.BinX"
-            return(self.conn._send(command).splitlines()[0])
-        command = "ccdsoftCamera.BinX = " + str(binning) + ";"
+        We assume NxN binning, so just set/get BinX.
+        """
+        command = f"ccdsoftCamera.BinX = {value};"
         output = self.conn._send(command).splitlines()
-        if output[0] != str(binning):
-            raise SkyxTypeError(output[0])
-        return(output[0])
-            
-    def Frame(self, frame=None):
+        if output[0] != str(value):
+            raise SkyxTypeError(f"Failed to set binning to {value}, response was {output[0]}")
+        return output[0]
+
+    @property 
+    def frame_type(self):
         ''' Set the Frame type or return the current type
 
             Be careful setting 'Dark' as the frame as this will open
             a dialog on screen.
         '''
-        if frame == None:
-            command = "ccdsoftCamera.Frame"
-            itype = self.conn._send(command).splitlines()[0]
-            return(self.frames[int(itype)])
-        try:
-            frameid = [x for x in self.frames if self.frames[x] == frame][0]
-        except:
+        command = "ccdsoftCamera.Frame"
+        itype = self.conn._send(command).splitlines()[0]
+        return(self.frames[int(itype)])
+    
+    @frame_type.setter
+    def frame_type(self, frame_type: str):
+        if not frame_type in self.frames:
             raise SkyxTypeError("Unknown Frame type. Must be one of: " +
                                 str(self.frames))
+
+        frameid = self.frames.index(frame_type)
         command = "ccdsoftCamera.Frame = " + str(frameid) + ";"
         output = self.conn._send(command).splitlines()
         if output[0] != str(frameid):
             raise SkyxTypeError(output[0])
-        return(frame)
-                               
-    def Series(self, num=None):
-        ''' Set the number of images in a series to num or return the
-            current number.
-        '''
-        #TODO
-        pass
-    
-    def TakeImage(self):
+
+    def take_image(self):
         ''' Takes an image.
         '''
-        #TODO
-        pass
+        command = """
+                  var Out = "";
+                  ccdsoftCamera.TakeImage();"""
+        self.conn._send(command)
+    
+    @property
+    def last_image_file_name(self):
+        command = """
+            var Out = "";
+            Out += ccdsoftCamera.LastImageFileName;
+        """
+        return self.conn._send(command)
+    
+    @property
+    def temperature(self):
+        command = """
+            var Out = "";
+            Out += ccdsoftCamera.Temperature;
+        """
+        return self.conn._send(command)
 
+    @property
+    def auto_save(self):
+        command = """
+        var Out = "";
+        Out += ccdsoftCamera.AutoSaveOn;
+        """
+        return bool(int(self.conn._send(command)))
 
-class sky6RASCOMTele(object):
-    ''' Class to implement the ccdsoftCamera script class
+    @auto_save.setter
+    def auto_save(self, state: bool):
+        command = f"""
+        ccdsoftCamera.AutoSaveOn = {int(state)};
+        """
+        self.conn._send(command)
+
+class SkyXTelescope(object):
+    ''' 
     '''
     def __init__(self, host="localhost", port=3040):
         ''' Define connection
         '''
         self.conn = SkyXConnection(host, port)
+        self.connect()
         
-    def Connect(self):
+    def connect(self):
         ''' Connect to the telescope
         '''
         command = """
-                  var Out;
+                  var Out = "";
                   sky6RASCOMTele.Connect();
                   Out = sky6RASCOMTele.IsConnected"""
         output = self.conn._send(command).splitlines()
@@ -412,12 +435,12 @@ class sky6RASCOMTele(object):
                                 "sky6RASCOMTele.IsConnected=" + output[0])
         return True
         
-    def Disconnect(self):
+    def disconnect(self):
         ''' Disconnect the telescope
             Whatever this actually does...
         '''
         command = """
-                  var Out;
+                  var Out = "";
                   sky6RASCOMTele.Disconnect();
                   Out = sky6RASCOMTele.IsConnected"""
         output = self.conn._send(command).splitlines()
@@ -426,26 +449,57 @@ class sky6RASCOMTele(object):
                                 "sky6RASCOMTele.IsConnected=" + output[0])
         return True
 
-    def GetRaDec(self):
+    @property
+    def pointing_ra_dec(self):
         ''' Get the current RA and Dec
         '''
         command = """
-                  var Out;
+                  var Out = "";
                   sky6RASCOMTele.GetRaDec();
                   Out = String(sky6RASCOMTele.dRa) + " " + String(sky6RASCOMTele.dDec);
                   """
-        output = self.conn._send(command).splitlines()[0].split()      
+        output = [float(x) for x in self.conn._send(command).splitlines()[0].split()]
         return output
     
-    def Sync(self, pos):
-        ''' Sync to a given pos [ra, dec]
-            ra, dec should be Jnow coordinates
-        '''
-        command = """
-                var Out = "";
-                sky6RASCOMTele.Sync(""" + pos[0] + "," + pos[1] + """, "pyskyx");
-                """
-        output = self.conn._send(command).splitlines()
-        print(output)
-        time.sleep(1)
-        print(self.GetRaDec())
+    def slew_to_ra_dec(self, ra_deg: float, dec_deg: float):
+        command= f"""
+        var Out = "";
+
+        sky6RASCOMTele.SlewToRaDec({ra_deg},{dec_deg}, "");
+        """
+        self.conn._send(command)
+
+    def set_tracking(self, ra_rate_asps: float, dec_rate_asps: float) -> list[float]:
+        command= f"""
+        var Out = "";
+
+        sky6RASCOMTele.SetTracking(1,0,{ra_rate_asps},{dec_rate_asps});
+        Out += sky6RASCOMTele.dRaTrackingRate + "\\n";
+        Out += sky6RASCOMTele.dDecTrackingRate; 
+        """
+        output = [float(x) for x in self.conn._send(command).splitlines()]
+        return output
+
+    def stop_tracking(self):
+        command= """
+        try {
+            sky6RASCOMTele.SetTracking(0,1,0,0);
+            Out += sky6RASCOMTele.dRaTrackingRate + "\\n";
+            Out += sky6RASCOMTele.dDecTrackingRate;
+        } catch (e) {
+            Out = "Error: " + e.message;
+        }
+        """
+        output = [float(x) for x in self.conn._send(command).splitlines()]
+        return output
+
+    def slew_to_ra_dec_and_custom_track(self, ra_deg: float, dec_deg: float, ra_rate_asps: float, dec_rate_asps: float):
+        self.slew_to_ra_dec(ra_deg, dec_deg)
+        self.set_tracking(ra_rate_asps, dec_rate_asps)
+    
+    def slew_and_track_satellite(self, intl_designator: str):
+        obj = SkyXTargetInformation()
+        target = obj(intl_designator)
+        self.slew_to_ra_dec_and_custom_track(target['ra_now'], target['dec_now'], 
+                                             target['ra_rate_aspersec'],
+                                             target['dec_rate_aspersec'])

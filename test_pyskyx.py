@@ -118,4 +118,3 @@ def test_closedloopslew(skyxconn):
     skyx.ccdsoftCamera().Connect()
     skyx.sky6RASCOMTele().Connect()
     assert skyxconn.closedloopslew("M81") == True
-    
