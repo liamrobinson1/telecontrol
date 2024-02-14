@@ -105,55 +105,6 @@ class SkyXConnection(object):
             return True
         else:
             raise SkyxObjectNotFoundError(target)
-                                    
-    def closedloopslew(self, target=None):
-        ''' Perform a closed loop slew.
-            You really need to have the Automated ImageLink Settings set up
-            right for this to work.
-            UNTESTED
-        '''
-        if target != None:
-            self.find(target)
-        command = '''
-            var nErr=0;
-            ccdsoftCamera.Connect();
-            ccdsoftCamera.AutoSaveOn = 1;
-            ImageLink.unknownScale = 1;
-            ClosedLoopSlew.Asynchronous = 1;
-            ClosedLoopSlew.exec();
-            nErr = ClosedLoopSlew.exec();
-            '''
-        oput = self._send(command)
-        for line in oput.splitlines():
-            if "Error" in line:
-                raise SkyxTypeError(line)
-        return True
-
-    def takeimages(self, exposure, nimages):
-        ''' Take a given number of images of a specified exposure.
-        '''
-        # TODO
-        command = """
-        var Imager = ccdsoftCamera;
-        function TakeOnePhoto()
-        {
-            Imager.Connect();
-            Imager.ExposureTime = """+str(exposure)+"""
-            Imager.Asynchronous = 0;
-            Imager.TakeImage();
-        }
-
-        function Main()
-        {
-            for (i=0; i<"""+str(nimages)+"""; ++i)
-            {
-                TakeOnePhoto();
-            }
-        }
-
-        Main();
-        """
-
 
 class TheSkyXAction(object):
     ''' Class to implement the TheSkyXAction script class
@@ -318,17 +269,19 @@ class SkyXCamera(object):
             raise SkyxTypeError(output[0])
         return True
     
-    def ExposureTime(self, exptime=None):
+    @property
+    def integration_time(self):
         ''' Set the exposure time to the given argument or return the 
             current exposure time.
         '''
-        if exptime == None:
-            command = "ccdsoftCamera.ExposureTime"
-            return(self.conn._send(command).splitlines()[0])
-
-        command = "ccdsoftCamera.ExposureTime = " + str(exptime) + ";"
+        command = "ccdsoftCamera.ExposureTime"
+        return(self.conn._send(command).splitlines()[0])
+    
+    @integration_time.setter
+    def integration_time(self, seconds: float):
+        command = "ccdsoftCamera.ExposureTime = " + str(seconds) + ";"
         output = self.conn._send(command).splitlines()
-        if output[0] != str(exptime):
+        if abs(float(output[0]) - seconds) > 1e-6:
             raise SkyxTypeError(output[0])
         return(output[0])
     
@@ -414,17 +367,20 @@ class SkyXCamera(object):
         self.conn._send(command)
 
 class SkyXTelescope(object):
-    ''' 
-    '''
     def __init__(self, host="localhost", port=3040):
-        ''' Define connection
-        '''
+        """Initializes the telescope
+
+        :param host: The host of TheSkyX's TCP server, defaults to "localhost"
+        :type host: str, optional
+        :param port: The port of TheSkyX's TCP server, defaults to 3040
+        :type port: int, optional
+        """
         self.conn = SkyXConnection(host, port)
         self.connect()
         
-    def connect(self):
-        ''' Connect to the telescope
-        '''
+    def connect(self) -> bool:
+        """Connects to the telescope
+        """
         command = """
                   var Out = "";
                   sky6RASCOMTele.Connect();
@@ -436,9 +392,8 @@ class SkyXTelescope(object):
         return True
         
     def disconnect(self):
-        ''' Disconnect the telescope
-            Whatever this actually does...
-        '''
+        """Disconnects the telescope
+        """
         command = """
                   var Out = "";
                   sky6RASCOMTele.Disconnect();
@@ -448,20 +403,17 @@ class SkyXTelescope(object):
             raise SkyxTypeError("Telescope still connected. " +\
                                 "sky6RASCOMTele.IsConnected=" + output[0])
         return True
-
-    @property
-    def pointing_ra_dec(self):
-        ''' Get the current RA and Dec
-        '''
-        command = """
-                  var Out = "";
-                  sky6RASCOMTele.GetRaDec();
-                  Out = String(sky6RASCOMTele.dRa) + " " + String(sky6RASCOMTele.dDec);
-                  """
-        output = [float(x) for x in self.conn._send(command).splitlines()[0].split()]
-        return output
     
-    def slew_to_ra_dec(self, ra_deg: float, dec_deg: float):
+
+    def slew_to_ra_dec(self, ra_deg: float, dec_deg: float) -> None:
+        """Sluews the telescope to the given RA and Dec
+
+        :param ra_deg: The RA in degrees
+        :type ra_deg: float
+        :param dec_deg: The Dec in degrees
+        :type dec_deg: float
+        :rtype: None
+        """
         command= f"""
         var Out = "";
 
@@ -469,37 +421,76 @@ class SkyXTelescope(object):
         """
         self.conn._send(command)
 
-    def set_tracking(self, ra_rate_asps: float, dec_rate_asps: float) -> list[float]:
-        command= f"""
+    @property
+    def tracking_rates(self) -> list[float]:
+        """Gets the tracking rates for the telescope
+
+        :return: The RA and Dec tracking rates in arcseconds per second
+        :rtype: list[float]
+        """
+        command= """
         var Out = "";
 
-        sky6RASCOMTele.SetTracking(1,0,{ra_rate_asps},{dec_rate_asps});
         Out += sky6RASCOMTele.dRaTrackingRate + "\\n";
         Out += sky6RASCOMTele.dDecTrackingRate; 
         """
         output = [float(x) for x in self.conn._send(command).splitlines()]
         return output
+    
+    def set_tracking_rates(self, ra_rate_asps: float, dec_rate_asps: float) -> None:
+        """Sets the tracking rates for the telescope
 
-    def stop_tracking(self):
-        command= """
-        try {
-            sky6RASCOMTele.SetTracking(0,1,0,0);
-            Out += sky6RASCOMTele.dRaTrackingRate + "\\n";
-            Out += sky6RASCOMTele.dDecTrackingRate;
-        } catch (e) {
-            Out = "Error: " + e.message;
-        }
+        :param ra_rate_asps: The RA tracking rate in arcseconds per second
+        :type ra_rate_asps: float
+        :param dec_rate_asps: The Dec tracking rate in arcseconds per second
+        :type dec_rate_asps: float
+        :rtype: None
         """
-        output = [float(x) for x in self.conn._send(command).splitlines()]
+        command= f"""
+            sky6RASCOMTele.SetTracking(1,0,{ra_rate_asps},{dec_rate_asps});
+        """
+        self.conn._send(command).splitlines()
+
+    def sidereal_tracking(self):
+        """Sets the telescope to sidereal tracking (zero RA/Dec rates)
+        """
+        self.set_tracking_rates(0, 0)
+
+    @property
+    def pointing_ra_dec(self):
+        """The current pointing RA and Dec in degrees
+        """
+        command = """
+                  var Out = "";
+                  sky6RASCOMTele.GetRaDec();
+                  Out = String(sky6RASCOMTele.dRa) + " " + String(sky6RASCOMTele.dDec);
+                  """
+        output = [float(x) for x in self.conn._send(command).splitlines()[0].split()]
         return output
 
-    def slew_to_ra_dec_and_custom_track(self, ra_deg: float, dec_deg: float, ra_rate_asps: float, dec_rate_asps: float):
+    def slew_to_ra_dec_and_track(self, ra_deg: float, dec_deg: float, ra_rate_asps: float, dec_rate_asps: float) -> None:
+        """Slews to the given RA and Dec and sets the tracking rates to the given values
+
+        :param ra_deg: The RA in degrees
+        :type ra_deg: float
+        :param dec_deg: The Dec in degrees
+        :type dec_deg: float
+        :param ra_rate_asps: The RA tracking rate in arcseconds per second
+        :type ra_rate_asps: float
+        :param dec_rate_asps: The Dec tracking rate in arcseconds per second
+        :type dec_rate_asps: float
+        """
         self.slew_to_ra_dec(ra_deg, dec_deg)
-        self.set_tracking(ra_rate_asps, dec_rate_asps)
+        self.set_tracking_rates(ra_rate_asps, dec_rate_asps)
     
-    def slew_and_track_satellite(self, intl_designator: str):
+    def slew_and_track_satellite(self, intl_designator: str) -> None:
+        """Slews to the given satellite and tracks it, if it is visible
+
+        :param intl_designator: The international designator of the satellite
+        :type intl_designator: str
+        """
         obj = SkyXTargetInformation()
         target = obj(intl_designator)
-        self.slew_to_ra_dec_and_custom_track(target['ra_now'], target['dec_now'], 
+        self.slew_to_ra_dec_and_track(target['ra_now'], target['dec_now'], 
                                              target['ra_rate_aspersec'],
                                              target['dec_rate_aspersec'])
