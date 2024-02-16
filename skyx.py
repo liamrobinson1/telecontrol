@@ -4,12 +4,16 @@ The classes are defined to match the classes in Script TheSkyX. This isn't
 really necessary as they all just send the javascript to TheSkyX via
 SkyXConnection._send().
 '''
-import logging
+from logging import getLogger, INFO, FileHandler
 import time
 from socket import socket, AF_INET, SOCK_STREAM, SHUT_RDWR, error
 
+logger = getLogger(__name__)
+logger.setLevel(INFO)
+handler = FileHandler('file.log')
+handler.setLevel(INFO)  # Set the log level on the handler
+logger.addHandler(handler)
 
-logger = logging.getLogger(__name__)
 
 class Singleton(object):
     ''' Singleton class so we dont have to keep specifing host and port'''
@@ -81,14 +85,14 @@ class SkyXConnection(object):
         ''' sends a js script to TheSkyX and returns the output.
         '''
         try:
-            logger.debug(command)
+            logger.info(command)
             sockobj = socket(AF_INET, SOCK_STREAM)
             sockobj.connect((self.host, self.port))
             sockobj.send(('/* Java Script */\n' +
                                '/* Socket Start Packet */\n' + command +
                                '\n/* Socket End Packet */\n').encode())
             oput = sockobj.recv(2048)
-            logger.debug(oput)
+            logger.info(oput)
             sockobj.shutdown(SHUT_RDWR)
             sockobj.close()
             return oput.decode().split("|")[0]
@@ -144,7 +148,7 @@ class SkyXTargetInformation(object):
         oput = self.conn._send(command)
         return oput
 
-    def current_target_ra_dec(self, j="now"):
+    def current_target_ra_dec(self, j: str = "now"):
         ''' Attempt to get info on the current target
         '''
         if j == "now":
@@ -172,15 +176,13 @@ class SkyXTargetInformation(object):
         else:
             raise SkyxTypeError("Unknown epoch: " + j)
         res = self.conn._send(command).splitlines()
-        logger.debug(res)
+        logger.info(res)
         output = [float(x) for x in res[0].split()   ] 
         return output
 
     def __call__(self, target):
         ''' Method to return basic SkyX position information on a target.
         '''
-        # TODO: make target optional
-        # TODO: return all data
         command = """
                 var Target = \"""" + target + """\";
                 var Target56 = 0;
@@ -242,6 +244,7 @@ class SkyXCamera(object):
       
             Returns True on success or throws a SkyxTypeError
         '''
+        logger.info("Connecting to camera...")
         command = """
                     var Imager = ccdsoftCamera;
                     var Out = "";
@@ -252,12 +255,13 @@ class SkyXCamera(object):
         output = self.conn._send(command).splitlines()
         if "Ready" not in output[0]:
             raise SkyxTypeError(output[0])
-        return True
+        logger.info("Connected to camera.")
 
     def disconnect(self):
         ''' Disconnect the camera
             Returns True on success or throws a SkyxTypeError
         '''
+        logger.info("Disconnecting from camera...")
         command = """
                     var Imager = ccdsoftCamera;
                     var Out = "";
@@ -267,27 +271,35 @@ class SkyXCamera(object):
         output = self.conn._send(command).splitlines()
         if "Not Connected" not in output[0]:
             raise SkyxTypeError(output[0])
-        return True
+        logger.info("Disconnected from camera.")
     
     @property
     def integration_time(self):
         ''' Set the exposure time to the given argument or return the 
             current exposure time.
         '''
+        logger.info("Getting integration time...")
         command = "ccdsoftCamera.ExposureTime"
         return(self.conn._send(command).splitlines()[0])
     
     @integration_time.setter
     def integration_time(self, seconds: float):
+        """Set the exposure time of the connected camera
+
+        :param seconds: The exposure time in seconds
+        :type seconds: float
+        :raises SkyxTypeError: If the exposure time was not successfully set
+        """
+        logger.info("Setting integration time...")
         command = "ccdsoftCamera.ExposureTime = " + str(seconds) + ";"
         output = self.conn._send(command).splitlines()
         if abs(float(output[0]) - seconds) > 1e-6:
             raise SkyxTypeError(output[0])
-        return(output[0])
     
     @property
     def binning(self):
         """Get the current binning."""
+        logger.info("Getting binning...")
         command = "ccdsoftCamera.BinX"
         binning_value = self.conn._send(command).splitlines()[0]
         return binning_value
@@ -298,6 +310,7 @@ class SkyXCamera(object):
         
         We assume NxN binning, so just set/get BinX.
         """
+        logger.info("Setting binning...")
         command = f"ccdsoftCamera.BinX = {value};"
         output = self.conn._send(command).splitlines()
         if output[0] != str(value):
@@ -306,17 +319,24 @@ class SkyXCamera(object):
 
     @property 
     def frame_type(self):
-        ''' Set the Frame type or return the current type
+        """Get the current frame type.
+        """
+        logger.info("Getting frame type...")
 
-            Be careful setting 'Dark' as the frame as this will open
-            a dialog on screen.
-        '''
         command = "ccdsoftCamera.Frame"
         itype = self.conn._send(command).splitlines()[0]
         return(self.frames[int(itype)])
     
     @frame_type.setter
     def frame_type(self, frame_type: str):
+        """Set the frame type of the connected camera
+
+        :param frame_type: The frame type to set, must be ["Light", "Bias", "Dark", "Flat Field"]
+        :type frame_type: str
+        :raises SkyxTypeError: If the frame type was not successfully set
+        :raises SkyxTypeError: If the frame type is not one of the allowed types
+        """
+        logger.info("Setting frame type...")
         if not frame_type in self.frames:
             raise SkyxTypeError("Unknown Frame type. Must be one of: " +
                                 str(self.frames))
@@ -330,13 +350,16 @@ class SkyXCamera(object):
     def take_image(self):
         ''' Takes an image.
         '''
+        logger.info("Taking image...")
         command = """
                   var Out = "";
                   ccdsoftCamera.TakeImage();"""
         self.conn._send(command)
+        logger.info("Image taken.")
     
     @property
     def last_image_file_name(self):
+        logger.info("Getting last image file name...")
         command = """
             var Out = "";
             Out += ccdsoftCamera.LastImageFileName;
@@ -345,6 +368,7 @@ class SkyXCamera(object):
     
     @property
     def temperature(self):
+        logger.info("Getting temperature...")
         command = """
             var Out = "";
             Out += ccdsoftCamera.Temperature;
@@ -361,6 +385,7 @@ class SkyXCamera(object):
 
     @auto_save.setter
     def auto_save(self, state: bool):
+        logger.info(f"Setting auto save to {state}")
         command = f"""
         ccdsoftCamera.AutoSaveOn = {int(state)};
         """
@@ -375,12 +400,14 @@ class SkyXTelescope(object):
         :param port: The port of TheSkyX's TCP server, defaults to 3040
         :type port: int, optional
         """
+        logger.info("Initializing telescope...")
         self.conn = SkyXConnection(host, port)
         self.connect()
         
     def connect(self) -> bool:
         """Connects to the telescope
         """
+        logger.info("Connecting to telescope...")
         command = """
                   var Out = "";
                   sky6RASCOMTele.Connect();
@@ -389,11 +416,12 @@ class SkyXTelescope(object):
         if int(output[0]) != 1:
             raise SkyxTypeError("Telescope not connected. "+\
                                 "sky6RASCOMTele.IsConnected=" + output[0])
-        return True
+        logger.info("Connected to telescope.")
         
     def disconnect(self):
         """Disconnects the telescope
         """
+        logger.info("Disconnecting from telescope...")
         command = """
                   var Out = "";
                   sky6RASCOMTele.Disconnect();
@@ -402,7 +430,7 @@ class SkyXTelescope(object):
         if int(output[0]) != 0:
             raise SkyxTypeError("Telescope still connected. " +\
                                 "sky6RASCOMTele.IsConnected=" + output[0])
-        return True
+        logger.info("Disconnected from telescope.")
     
 
     def slew_to_ra_dec(self, ra_deg: float, dec_deg: float) -> None:
@@ -414,12 +442,17 @@ class SkyXTelescope(object):
         :type dec_deg: float
         :rtype: None
         """
+        logger.info("Slewing to RA: " + str(ra_deg) + " Dec: " + str(dec_deg) + "...")
+        t1 = time.time()
+        ra_hr = ra_deg * 24/360
         command= f"""
         var Out = "";
 
-        sky6RASCOMTele.SlewToRaDec({ra_deg},{dec_deg}, "");
+        sky6RASCOMTele.SlewToRaDec({ra_hr},{dec_deg}, "");
         """
         self.conn._send(command)
+        t2 = time.time()
+        logger.info("Slewed to RA: " + str(ra_deg) + " Dec: " + str(dec_deg) + " in " + str(t2-t1) + " seconds.")
 
     @property
     def tracking_rates(self) -> list[float]:
@@ -428,6 +461,7 @@ class SkyXTelescope(object):
         :return: The RA and Dec tracking rates in arcseconds per second
         :rtype: list[float]
         """
+        logger.info("Getting tracking rates...")
         command= """
         var Out = "";
 
@@ -446,6 +480,7 @@ class SkyXTelescope(object):
         :type dec_rate_asps: float
         :rtype: None
         """
+        logger.info(f"Setting tracking rates to RA: {ra_rate_asps} Dec: {dec_rate_asps}...")
         command= f"""
             sky6RASCOMTele.SetTracking(1,0,{ra_rate_asps},{dec_rate_asps});
         """
@@ -460,12 +495,14 @@ class SkyXTelescope(object):
     def pointing_ra_dec(self):
         """The current pointing RA and Dec in degrees
         """
+        logger.info("Getting pointing RA and Dec...")
         command = """
                   var Out = "";
                   sky6RASCOMTele.GetRaDec();
                   Out = String(sky6RASCOMTele.dRa) + " " + String(sky6RASCOMTele.dDec);
                   """
         output = [float(x) for x in self.conn._send(command).splitlines()[0].split()]
+        output[0] *= 360/24
         return output
 
     def slew_to_ra_dec_and_track(self, ra_deg: float, dec_deg: float, ra_rate_asps: float, dec_rate_asps: float) -> None:
@@ -489,6 +526,7 @@ class SkyXTelescope(object):
         :param intl_designator: The international designator of the satellite
         :type intl_designator: str
         """
+        logger.info(f"Slewing to satellite {intl_designator}...")
         obj = SkyXTargetInformation()
         target = obj(intl_designator)
         self.slew_to_ra_dec_and_track(target['ra_now'], target['dec_now'], 
